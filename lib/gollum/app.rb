@@ -1,4 +1,8 @@
 # ~*~ encoding: utf-8 ~*~
+# add login rb file
+require File.dirname(__FILE__) + '/login'
+# add login rb file
+#require 'rjb'
 require 'cgi'
 require 'sinatra'
 require 'gollum-lib'
@@ -84,12 +88,12 @@ module Precious
 
     # Sinatra error handling
     configure :development, :staging do
-      enable :show_exceptions, :dump_errors
+      enable :show_exceptions, :dump_errors, :sessions
       disable :raise_errors, :clean_trace
     end
 
     configure :test do
-      enable :logging, :raise_errors, :dump_errors
+      enable :logging, :raise_errors, :dump_errors, :sessions
     end
 
     before do
@@ -98,14 +102,104 @@ module Precious
       forbid unless @allow_editing || request.request_method == "GET"
       Precious::App.set(:mustache, {:templates => settings.wiki_options[:template_dir]}) if settings.wiki_options[:template_dir]
       @base_url = url('/', false).chomp('/')
+
       @page_dir = settings.wiki_options[:page_file_dir].to_s
       # above will detect base_path when it's used with map in a config.ru
       settings.wiki_options.merge!({ :base_path => @base_url })
       @css = settings.wiki_options[:css]
       @js  = settings.wiki_options[:js]
       @mathjax_config = settings.wiki_options[:mathjax_config]
+
+
+      #session['message']='hello'
+
+      if request.request_method != "GET" and request.path_info !='/login'
+        if session['role'] != 'normal' and session['role'] != 'super'
+          session['message'] ='请先登录再进行后续操作'
+          redirect '/login'
+        end
+
+      end
+      #  filter  normal access
+      if request.path_info.include?'edit' or request.path_info.include?'create'
+        if session['role'] != 'normal' and session['role'] != 'super'
+          session['message'] ='请先登录再进行后续操作'
+          redirect '/login'
+        end
+
+      end
+      # super user access
+      if request.path_info.include?'history' or request.path_info.include?'latest_changes' or
+          request.path_info.include?'delete'
+        if session['role'] != 'super'
+          if session['role'] == 'normal'
+            session['message'] ='当前身份没有该操作权限，请重新登录'
+          else
+            session['message'] ='请先登录再进行后续操作'
+          end
+
+          redirect '/login'
+        end
+      end
+
+      #print session['message']
+      end
+    get '/login' do
+
+      #auth = Auth.new
+      #auth.printLoginForm(session['message'])
+      Auth.printLoginForm(session['message'])
+
+
+    end
+    get '/logout' do
+      session['role'] = 'null'
+      redirect '/'
     end
 
+    post '/login' do
+      #params[:Name]
+      #params[:Password]
+      login_role = Auth.authUnErp(params[:Name] ,params[:Password] )
+      if login_role == 'normal' or login_role == 'super'
+        session['role'] = login_role
+        session['userId'] = params[:Name]
+        #session['gollum.author'] = session['userId']
+        redirect '/'
+      else
+        redirect '/login'
+      end
+    end
+
+    get '/loginSuccess' do
+      session['username']
+    end
+    get '/testMes' do
+     # request.body              # 被客户端设定的请求体（见下）
+     # request.scheme            # "http"
+     # request.script_name       # "/example"
+     # request.path_info         # "/foo"
+      #request.port              # 80
+      #request.request_method    # "GET"
+     # request.query_string      # ""
+     # request.content_length    # request.body的长度
+    #  request.media_type        # request.body的媒体类型
+    #    request.host              # "example.com"
+    #  request.get?              # true (其他动词也具有类似方法)
+    #  request.form_data?        # false
+    #  request["SOME_HEADER"]    # SOME_HEADER header的值
+    #  request.referrer          # 客户端的referrer 或者 '/'
+     # request.user_agent        # user agent (被 :agent 条件使用)
+     mysession = request.cookies        # 浏览器 cookies 哈希
+      mysession['rack.session']
+    #  request.xhr?              # 这是否是ajax请求？
+     # request.url               # "http://example.com/example/foo"
+      #request.path              # "/example/foo"
+     # request.ip                # 客户端IP地址
+     # request.secure?           # false（如果是ssl则为true）
+      #request.forwarded?        # true （如果是运行在反向代理之后）
+      #request.env               # Rack中使用的未处理的env哈希
+    end
     get '/' do
       redirect clean_url(::File.join(@base_url, @page_dir, wiki_new.index_page))
     end
@@ -192,7 +286,7 @@ module Precious
           :message => "Uploaded file to #{dir}/#{reponame}",
           :parent  => wiki.repo.head.commit,
       }
-      author  = session['gollum.author']
+      author  = { :name =>session['userId']}
       unless author.nil?
         options.merge! author
       end
@@ -502,7 +596,20 @@ module Precious
         @h1_title      = wiki.h1_title
         @bar_side      = wiki.bar_side
         @allow_uploads = wiki.allow_uploads
+        #set username
+        @global_user ='登录'
+        @login_url ='login'
+        if session['role'] == 'normal' or session['role'] == 'super'
+          @global_user  = session['userId'] +' (注销)'
+          @login_url = 'logout'
+          print '==logined==='
+        else
 
+          print '===notlogin =='
+        end
+        #print @name
+        #@ttt = @name
+       # page.setUser('hhhh')
         mustache :page
       elsif file = wiki.file(fullpath, wiki.ref, true)
         show_file(file)
@@ -543,7 +650,7 @@ module Precious
     def commit_message
       msg               = (params[:message].nil? or params[:message].empty?) ? "[no message]" : params[:message]
       commit_message    = { :message => msg }
-      author_parameters = session['gollum.author']
+      author_parameters = { :name =>session['userId']}
       commit_message.merge! author_parameters unless author_parameters.nil?
       commit_message
     end
