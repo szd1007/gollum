@@ -54,7 +54,12 @@ module Precious
       def allow_uploads
         @allow_uploads
       end
-
+      def global_user
+        @global_user
+      end
+      def login_url
+        @login_url
+      end
       def upload_dest
         @upload_dest
       end
